@@ -241,21 +241,27 @@ func (r *RustPlus) Connect() error {
 // Disconnect closes the WebSocket connection
 func (r *RustPlus) Disconnect() error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	if r.stopReplenish != nil {
 		close(r.stopReplenish)
 		r.stopReplenish = nil
 	}
 
-	if r.ws != nil {
-		err := r.ws.Close()
-		r.ws = nil
-		r.emit(Event{Type: EventDisconnected})
-		return err
+	if r.ws == nil {
+		r.mu.Unlock()
+		return nil
 	}
 
-	return nil
+	// Send a WebSocket close frame so the server knows we're disconnecting cleanly.
+	// Ignore errors — the connection may already be broken.
+	_ = r.ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	err := r.ws.Close()
+	r.ws = nil
+	r.mu.Unlock()
+
+	// Emit outside the lock to avoid deadlock: emit needs RLock, we held Lock above.
+	r.emit(Event{Type: EventDisconnected})
+	return err
 }
 
 // IsConnected returns whether the client is connected
